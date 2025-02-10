@@ -484,7 +484,7 @@ const VideoCall: React.FC = () => {
             ref={localVideoRef}
             autoPlay
             playsInline
-            
+            muted
             className="w-full bg-black"
           />
         </div>
