@@ -314,43 +314,41 @@ const VideoCall: React.FC = () => {
         localStream: stream,
       }));
 
-       if (
-         rnnoiseNode.current &&
-         audioContext.current &&
-         callState.localStream &&
-         workletLoaded.current
-       ) {
-         const source = audioContext.current.createMediaStreamSource(
-           callState.localStream
-         );
-         const destination =
-           audioContext.current.createMediaStreamDestination();
+      if (
+        rnnoiseNode.current &&
+        audioContext.current &&
+        callState.localStream &&
+        workletLoaded.current
+      ) {
+        // Resume audio context if suspended
+        if (audioContext.current.state === "suspended") {
+          await audioContext.current.resume();
+        }
 
-         source.connect(rnnoiseNode.current).connect(destination);
+        const source = audioContext.current.createMediaStreamSource(
+          callState.localStream
+        );
+        const destination = audioContext.current.createMediaStreamDestination();
 
-         // Replace the audio track in the original stream with the processed one
-         const audioTrack = destination.stream.getAudioTracks()[0];
-         const originalAudioTrack = callState.localStream.getAudioTracks()[0];
+        source.connect(rnnoiseNode.current).connect(destination);
 
-         callState.localStream.removeTrack(originalAudioTrack);
-         callState.localStream.addTrack(audioTrack);
+        const processedAudioTrack = destination.stream.getAudioTracks()[0];
+        const audioSender = peerConnection.current
+          ?.getSenders()
+          .find((s) => s.track?.kind === "audio");
 
-         // Update the peer connection with the new stream
-         const senders = peerConnection.current?.getSenders() || [];
-         senders.forEach((sender) => {
-           if (sender?.track?.kind === "audio") {
-             peerConnection.current?.removeTrack(sender);
-           }
-         });
-
-         destination.stream.getAudioTracks().forEach((track) => {
-           peerConnection.current?.addTrack(track, destination.stream);
-         });
-       } else if (!workletLoaded.current) {
-         console.warn(
-           "RNNoise worklet not yet loaded. Cannot start local stream with noise suppression."
-         );
-       }
+        if (audioSender) {
+          // Replace the existing audio track with the processed one
+          await audioSender.replaceTrack(processedAudioTrack);
+        } else {
+          // Add new track if no existing sender
+          peerConnection.current?.addTrack(processedAudioTrack, stream);
+        }
+      } else if (!workletLoaded.current) {
+        console.warn(
+          "RNNoise worklet not yet loaded. Cannot start local stream with noise suppression."
+        );
+      }
 
       return callState.localStream;
     } catch (error) {
