@@ -26,6 +26,7 @@ const VideoCall: React.FC = () => {
   const [userId, setUserId] = useState<string>(
     `User_${Math.floor(Math.random() * 1000)}`
   );
+  const [isCalling, setIsCalling] = useState(false);
 
   const peerConnection = useRef<RTCPeerConnection | null>(null);
   const socket = useRef<Socket | null>(null);
@@ -103,8 +104,14 @@ const VideoCall: React.FC = () => {
 
     peerConnection.current.ontrack = (event) => {
       console.log("📥 Received remote track:", event.track.kind);
-      if (remoteVideoRef.current && event.streams[0]) {
-        remoteVideoRef.current.srcObject = event.streams[0];
+      if (event.streams && event.streams[0]) {
+        // Check if streams exist
+        if (event.track.kind === "video" && remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = event.streams[0];
+        } else if (event.track.kind === "audio" && remoteVideoRef.current) {
+          // If you have a separate audio element, set it here. Otherwise, the video element will play both.
+          // remoteAudioRef.current.srcObject = event.streams[0];
+        }
         setCallState((prev) => ({
           ...prev,
           remoteStream: event.streams[0],
@@ -300,14 +307,38 @@ const VideoCall: React.FC = () => {
         localVideoRef.current.srcObject = stream;
       }
 
-      const senders = peerConnection.current?.getSenders() || [];
-      senders.forEach((sender) => {
-        peerConnection.current?.removeTrack(sender);
-      });
+      // const senders = peerConnection.current?.getSenders() || [];
+      // senders.forEach((sender) => {
+      //   peerConnection.current?.removeTrack(sender);
+      // });
 
-      stream.getTracks().forEach((track) => {
-        peerConnection.current?.addTrack(track, stream);
-      });
+      // if (peerConnection.current && callState.localStream) {
+      //   callState.localStream.getTracks().forEach((track) => {
+      //     const sender = peerConnection.current
+      //       ?.getSenders()
+      //       .find((s) => s.track?.kind === track.kind);
+      //     if (sender) {
+      //       sender.replaceTrack(track);
+      //     } else {
+      //       peerConnection.current?.addTrack(track, callState.localStream!);
+      //     }
+      //   });
+      // }
+
+          if (peerConnection.current && stream) {
+            // Use the newly acquired stream
+            stream.getTracks().forEach((track) => {
+              // Iterate over the new stream's tracks
+              const sender = peerConnection.current
+                ?.getSenders()
+                .find((s) => s.track?.kind === track.kind);
+              if (sender) {
+                sender.replaceTrack(track); // Replace the track if a sender exists
+              } else {
+                peerConnection.current?.addTrack(track, stream); // Add the track if no sender exists
+              }
+            });
+          }
 
       setCallState((prev) => ({
         ...prev,
@@ -350,7 +381,7 @@ const VideoCall: React.FC = () => {
         );
       }
 
-      return callState.localStream;
+      return stream;
     } catch (error) {
       console.error("Error starting local stream:", error);
       throw error;
@@ -388,7 +419,10 @@ const VideoCall: React.FC = () => {
   };
 
   const makeCall = async (targetSocketId: string) => {
+    if (isCalling) return;
+    setIsCalling(true);
     console.log("📞 Initiating call to socket:", targetSocketId);
+
     try {
       await startLocalStream();
       setCallState((prev) => ({ ...prev, remoteSocketId: targetSocketId }));
@@ -407,6 +441,8 @@ const VideoCall: React.FC = () => {
     } catch (error) {
       console.error("❌ Error making call:", error);
       resetCallState();
+    } finally {
+      setIsCalling(false);
     }
   };
 
