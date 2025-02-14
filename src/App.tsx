@@ -305,6 +305,17 @@ const VideoCall: React.FC = () => {
 
       setCallState((prev) => ({ ...prev, localStream: stream }));
 
+      console.log("Audio Tracks:", stream.getAudioTracks()); // Check tracks immediately
+      console.log("Video Tracks:", stream.getVideoTracks()); // Check tracks immediately
+
+      // *** Simplified Track Addition (NO RNNoise, NO replaceTrack) ***
+      if (peerConnection.current) {
+        stream.getTracks().forEach((track) => {
+          console.log("Adding Track:", track); // Log before adding
+          peerConnection.current?.addTrack(track, stream);
+        });
+      }
+
       // *** RNNoise Integration ***
       let processedStream = stream; // Default to original stream
       // if (
@@ -360,24 +371,24 @@ const VideoCall: React.FC = () => {
     }
   };
 
-   const handleNegotiationNeeded = async () => {
-     try {
-       const offer = await peerConnection.current?.createOffer();
-       await peerConnection.current?.setLocalDescription(offer);
-       socket.current?.emit("call", {
-         to: callState.remoteSocketId,
-         offer,
-       });
-     } catch (error) {
-       console.error("Error creating offer:", error);
-     }
-   };
+  const handleNegotiationNeeded = async () => {
+    try {
+      const offer = await peerConnection.current?.createOffer();
+      await peerConnection.current?.setLocalDescription(offer);
+      socket.current?.emit("call", {
+        to: callState.remoteSocketId,
+        offer,
+      });
+    } catch (error) {
+      console.error("Error creating offer:", error);
+    }
+  };
 
-   useEffect(() => {
-     if (peerConnection.current) {
-       peerConnection.current.onnegotiationneeded = handleNegotiationNeeded;
-     }
-   }, [peerConnection.current]);
+  useEffect(() => {
+    if (peerConnection.current) {
+      peerConnection.current.onnegotiationneeded = handleNegotiationNeeded;
+    }
+  }, [peerConnection.current]);
 
   const handleDeviceChange = async (
     deviceId: string,
