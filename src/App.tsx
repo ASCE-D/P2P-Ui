@@ -495,6 +495,14 @@ const VideoCall: React.FC = () => {
             const testStream = new MediaStream([processedAudioTrack]);
             testAudio.srcObject = testStream;
 
+            testAudio.play().catch((error) => {
+              console.log("Test audio play failed:", error);
+              // Show UI notification: "Click anywhere to enable audio"
+              document.body.addEventListener("click", () => testAudio.play(), {
+                once: true,
+              });
+            });
+
             console.log("Test audio element created and stream attached");
 
             // Create processed stream for peer connection
@@ -509,10 +517,10 @@ const VideoCall: React.FC = () => {
             });
 
             // Add a volume meter for visual feedback
-           const audioContext = ctx.current;
-           const analyser = audioContext.createAnalyser();
-           const source2 = audioContext.createMediaStreamSource(testStream);
-           source2.connect(analyser);
+            const audioContext = ctx.current;
+            const analyser = audioContext.createAnalyser();
+            const source2 = audioContext.createMediaStreamSource(testStream);
+            source2.connect(analyser);
 
             analyser.fftSize = 256;
             const dataArray = new Uint8Array(analyser.frequencyBinCount);
