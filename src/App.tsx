@@ -73,24 +73,20 @@ const VideoCall: React.FC = () => {
     const loadRnnoise = async () => {
       try {
         audioContext.current = new AudioContext();
-
-        // 1. Load the worklet *and wait for it to load*:
         await audioContext.current.audioWorklet.addModule(
           NoiseSuppressorWorklet
         );
-
-        // 2. *After* the worklet is loaded, create the node:
         rnnoiseNode.current = new AudioWorkletNode(
           audioContext.current,
           NoiseSuppressorWorklet_Name
         );
-        workletLoaded.current = true; // Mark as loaded
+        workletLoaded.current = true;
       } catch (error) {
         console.error("Error loading RNNoise:", error);
       }
     };
 
-    loadRnnoise();
+    loadRnnoise(); // Load RNNoise only once
 
     return () => {
       if (audioContext.current) {
@@ -293,7 +289,7 @@ const VideoCall: React.FC = () => {
         audio: {
           deviceId: devices.selectedAudioInput,
           echoCancellation: true,
-          noiseSuppression: true,
+          noiseSuppression: true, // Keep noise suppression here for initial getUserMedia
           autoGainControl: true,
         },
         video: {
@@ -307,86 +303,81 @@ const VideoCall: React.FC = () => {
         localVideoRef.current.srcObject = stream;
       }
 
-      // const senders = peerConnection.current?.getSenders() || [];
-      // senders.forEach((sender) => {
-      //   peerConnection.current?.removeTrack(sender);
-      // });
+      setCallState((prev) => ({ ...prev, localStream: stream }));
 
-      // if (peerConnection.current && callState.localStream) {
-      //   callState.localStream.getTracks().forEach((track) => {
-      //     const sender = peerConnection.current
-      //       ?.getSenders()
-      //       .find((s) => s.track?.kind === track.kind);
-      //     if (sender) {
-      //       sender.replaceTrack(track);
-      //     } else {
-      //       peerConnection.current?.addTrack(track, callState.localStream!);
-      //     }
-      //   });
-      // }
-
-          if (peerConnection.current && stream) {
-            // Use the newly acquired stream
-            stream.getTracks().forEach((track) => {
-              // Iterate over the new stream's tracks
-              const sender = peerConnection.current
-                ?.getSenders()
-                .find((s) => s.track?.kind === track.kind);
-              if (sender) {
-                sender.replaceTrack(track); // Replace the track if a sender exists
-              } else {
-                peerConnection.current?.addTrack(track, stream); // Add the track if no sender exists
-              }
-            });
-          }
-
-      setCallState((prev) => ({
-        ...prev,
-        localStream: stream,
-      }));
-
+      // *** RNNoise Integration ***
+      let processedStream = stream; // Default to original stream
       if (
         rnnoiseNode.current &&
         audioContext.current &&
-        callState.localStream &&
         workletLoaded.current
       ) {
-        // Resume audio context if suspended
-        if (audioContext.current.state === "suspended") {
-          await audioContext.current.resume();
-        }
+        const audioTracks = stream.getAudioTracks();
+        if (audioTracks.length > 0) {
+          const source = audioContext.current.createMediaStreamSource(stream);
+          source.connect(rnnoiseNode.current);
+          rnnoiseNode.current.connect(audioContext.current.destination);
+          processedStream = new MediaStream();
+          // @ts-ignore
+          const rnnoiseOutput = rnnoiseNode.current.stream;
+          rnnoiseOutput
+            .getAudioTracks()
+            // @ts-ignore
+            .forEach((track) => processedStream.addTrack(track));
+          stream
+            .getVideoTracks()
+            .forEach((track) => processedStream.addTrack(track));
 
-        const source = audioContext.current.createMediaStreamSource(
-          callState.localStream
-        );
-        const destination = audioContext.current.createMediaStreamDestination();
-
-        source.connect(rnnoiseNode.current).connect(destination);
-
-        const processedAudioTrack = destination.stream.getAudioTracks()[0];
-        const audioSender = peerConnection.current
-          ?.getSenders()
-          .find((s) => s.track?.kind === "audio");
-
-        if (audioSender) {
-          // Replace the existing audio track with the processed one
-          await audioSender.replaceTrack(processedAudioTrack);
+          //Stop the old tracks from the original stream
+          stream.getAudioTracks().forEach((track) => track.stop());
+          stream.getVideoTracks().forEach((track) => track.stop());
         } else {
-          // Add new track if no existing sender
-          peerConnection.current?.addTrack(processedAudioTrack, stream);
+          console.warn("No audio track found for RNNoise.");
         }
-      } else if (!workletLoaded.current) {
-        console.warn(
-          "RNNoise worklet not yet loaded. Cannot start local stream with noise suppression."
-        );
       }
 
-      return stream;
+      // 3. Add/Replace Tracks in Peer Connection (ONCE)
+      if (peerConnection.current) {
+        const senders = peerConnection.current.getSenders();
+        processedStream.getTracks().forEach((track) => {
+          const sender = senders.find(
+            (s) => s.track && s.track.kind === track.kind
+          );
+          if (sender) {
+            sender.replaceTrack(track).then(() => {
+              if (peerConnection.current?.signalingState !== "stable") {
+                handleNegotiationNeeded();
+              }
+            }); // Replace track
+          } else {
+            peerConnection?.current?.addTrack(track, processedStream); // Add track (only on initial stream setup)
+          }
+        });
+      }
     } catch (error) {
       console.error("Error starting local stream:", error);
       throw error;
     }
   };
+
+   const handleNegotiationNeeded = async () => {
+     try {
+       const offer = await peerConnection.current?.createOffer();
+       await peerConnection.current?.setLocalDescription(offer);
+       socket.current?.emit("call", {
+         to: callState.remoteSocketId,
+         offer,
+       });
+     } catch (error) {
+       console.error("Error creating offer:", error);
+     }
+   };
+
+   useEffect(() => {
+     if (peerConnection.current) {
+       peerConnection.current.onnegotiationneeded = handleNegotiationNeeded;
+     }
+   }, [peerConnection.current]);
 
   const handleDeviceChange = async (
     deviceId: string,
