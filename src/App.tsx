@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Socket, io } from "socket.io-client";
 import { DeviceSelectionState, CallState, User } from "./types";
-import { NoiseSuppressorWorklet_Name } from "@timephy/rnnoise-wasm";
-import NoiseSuppressorWorklet from "@timephy/rnnoise-wasm/NoiseSuppressorWorklet?worker&url";
+import { SpeexWorkletNode } from "@sapphi-red/web-noise-suppressor";
+import speexWorkletPath from "@sapphi-red/web-noise-suppressor/speexWorklet.js?url";
+import speexWasmPath from "@sapphi-red/web-noise-suppressor/speex.wasm?url";
 
 const VideoCall: React.FC = () => {
   const [devices, setDevices] = useState<DeviceSelectionState>({
@@ -34,7 +35,40 @@ const VideoCall: React.FC = () => {
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const rnnoiseNode = useRef<AudioWorkletNode | null>(null);
   const audioContext = useRef<AudioContext | null>(null);
-  const workletLoaded = useRef(false); // Track worklet loading
+  // const workletLoaded = useRef(false); // Track worklet loading
+
+  const speex = useRef<SpeexWorkletNode | null>(null);
+  const ctx = useRef<AudioContext | null>(null);
+  const workletLoaded = useRef(false);
+  const speexWasmBinaryRef = useRef<ArrayBuffer | null>(null);
+
+  useEffect(() => {
+    const loadSpeexWorklet = async () => {
+      try {
+        ctx.current = new AudioContext();
+
+        const response = await fetch(speexWasmPath);
+        const speexWasmBinary = await response.arrayBuffer();
+        speexWasmBinaryRef.current = speexWasmBinary;
+
+        await ctx.current.audioWorklet.addModule(speexWorkletPath);
+        workletLoaded.current = true;
+      } catch (error) {
+        console.error("Error loading Speex worklet:", error);
+      }
+    };
+
+    loadSpeexWorklet();
+
+    return () => {
+      if (speex.current) {
+        speex.current.disconnect(); // Disconnect Speex node
+      }
+      if (ctx.current) {
+        ctx.current.close(); // Close AudioContext
+      }
+    };
+  }, []);
 
   useEffect(() => {
     console.log("🔄 Initializing VideoCall component");
@@ -69,31 +103,31 @@ const VideoCall: React.FC = () => {
     }
   }, [userId, socketId]);
 
-  useEffect(() => {
-    const loadRnnoise = async () => {
-      try {
-        audioContext.current = new AudioContext();
-        await audioContext.current.audioWorklet.addModule(
-          NoiseSuppressorWorklet
-        );
-        rnnoiseNode.current = new AudioWorkletNode(
-          audioContext.current,
-          NoiseSuppressorWorklet_Name
-        );
-        workletLoaded.current = true;
-      } catch (error) {
-        console.error("Error loading RNNoise:", error);
-      }
-    };
+  // useEffect(() => {
+  //   const loadRnnoise = async () => {
+  //     try {
+  //       audioContext.current = new AudioContext();
+  //       await audioContext.current.audioWorklet.addModule(
+  //         NoiseSuppressorWorklet
+  //       );
+  //       rnnoiseNode.current = new AudioWorkletNode(
+  //         audioContext.current,
+  //         NoiseSuppressorWorklet_Name
+  //       );
+  //       workletLoaded.current = true;
+  //     } catch (error) {
+  //       console.error("Error loading RNNoise:", error);
+  //     }
+  //   };
 
-    loadRnnoise(); // Load RNNoise only once
+  //   loadRnnoise(); // Load RNNoise only once
 
-    return () => {
-      if (audioContext.current) {
-        audioContext.current.close();
-      }
-    };
-  }, []);
+  //   return () => {
+  //     if (audioContext.current) {
+  //       audioContext.current.close();
+  //     }
+  //   };
+  // }, []);
 
   const setupPeerConnectionHandlers = () => {
     if (!peerConnection.current) return;
@@ -355,61 +389,67 @@ const VideoCall: React.FC = () => {
       //     peerConnection.current?.addTrack(track, stream);
       //   });
       // }
+     if (
+       speex.current &&
+       ctx.current &&
+       speexWasmBinaryRef.current &&
+       workletLoaded.current
+     ) {
+       const audioTracks = stream.getAudioTracks();
+       if (audioTracks.length > 0) {
+         const audioTrack = audioTracks[0];
 
-      // *** RNNoise Integration ***
-      if (
-        rnnoiseNode.current &&
-        audioContext.current &&
-        workletLoaded.current
-      ) {
-        const audioTracks = stream.getAudioTracks();
-        if (audioTracks.length > 0) {
-          const audioTrack = audioTracks[0]; // Get the first audio track
+         // Create source from the original stream
+         const source = ctx.current.createMediaStreamSource(stream);
 
-          // 1. Create Source Node
-          const source = audioContext.current.createMediaStreamSource(stream);
+         // Create new Speex node
+         speex.current = new SpeexWorkletNode(ctx.current, {
+           wasmBinary: speexWasmBinaryRef.current,
+           maxChannels: 2,
+         });
 
-          // 2. Connect Source to RNNoise Node
-          source.connect(rnnoiseNode.current);
+         // Create a MediaStreamDestination to get the processed audio
+         const audioDestination = ctx.current.createMediaStreamDestination();
 
-          // 3. Create Destination (for processed audio)
-          const destination =
-            audioContext.current.createMediaStreamDestination();
+         // Connect the audio processing chain
+         source.connect(speex.current);
+         speex.current.connect(audioDestination);
 
-          // 4. Connect RNNoise to Destination
-          rnnoiseNode.current.connect(destination);
+         // Get the processed audio track
+         const processedAudioTrack =
+           audioDestination.stream.getAudioTracks()[0];
 
-          // 5. Create new processed stream
-          const processedStream = new MediaStream([
-            destination.stream.getAudioTracks()[0],
-            ...stream.getVideoTracks(),
-          ]);
+         // Create a new MediaStream with processed audio and original video
+         const processedStream = new MediaStream([
+           processedAudioTrack,
+           ...stream.getVideoTracks(),
+         ]);
 
-          console.log(
-            "Processed Audio Tracks:",
-            processedStream.getAudioTracks()
-          );
-          // 6. Add/Replace Tracks in Peer Connection
-          processedStream
-            .getTracks()
-            .forEach((track) =>
-              addOrReplaceTrack({ track, stream: processedStream })
-            );
+         // Add or replace tracks in the peer connection
+         processedStream
+           .getTracks()
+           .forEach((track) =>
+             addOrReplaceTrack({ track, stream: processedStream })
+           );
 
-          // 7. Stop original audio track
-          audioTrack.stop();
-        } else {
-          console.warn("No audio track found for RNNoise processing.");
-          stream
-            .getTracks()
-            .forEach((track) => addOrReplaceTrack({ track, stream })); // Add original tracks
-        }
-      } else {
-        console.log("RNNoise not loaded. Using original stream.");
-        stream
-          .getTracks()
-          .forEach((track) => addOrReplaceTrack({ track, stream })); // Add original tracks
-      }
+         // Optional: Connect to destination for local monitoring
+         // Be careful with this as it might cause echo
+         // speex.current.connect(ctx.current.destination);
+
+         // Stop the original audio track since we're using the processed one
+         audioTrack.stop();
+       } else {
+         // Fallback to original stream if no audio tracks
+         stream
+           .getTracks()
+           .forEach((track) => addOrReplaceTrack({ track, stream }));
+       }
+     } else {
+       // Fallback to original stream if Speex isn't initialized
+       stream
+         .getTracks()
+         .forEach((track) => addOrReplaceTrack({ track, stream }));
+     }
     } catch (error) {
       console.error("Error starting local stream:", error);
       throw error;

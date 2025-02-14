@@ -10,6 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@jitsi/rnnoise-wasm": "^0.2.1",
+    "@sapphi-red/web-noise-suppressor": "^0.3.5",
     "@tailwindcss/vite": "^4.0.4",
     "@timephy/rnnoise-wasm": "^1.0.0",
     "@types/webrtc": "^0.0.44",
