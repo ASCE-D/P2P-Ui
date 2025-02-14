@@ -69,31 +69,31 @@ const VideoCall: React.FC = () => {
     }
   }, [userId, socketId]);
 
-  useEffect(() => {
-    const loadRnnoise = async () => {
-      try {
-        audioContext.current = new AudioContext();
-        await audioContext.current.audioWorklet.addModule(
-          NoiseSuppressorWorklet
-        );
-        rnnoiseNode.current = new AudioWorkletNode(
-          audioContext.current,
-          NoiseSuppressorWorklet_Name
-        );
-        workletLoaded.current = true;
-      } catch (error) {
-        console.error("Error loading RNNoise:", error);
-      }
-    };
+  // useEffect(() => {
+  //   const loadRnnoise = async () => {
+  //     try {
+  //       audioContext.current = new AudioContext();
+  //       await audioContext.current.audioWorklet.addModule(
+  //         NoiseSuppressorWorklet
+  //       );
+  //       rnnoiseNode.current = new AudioWorkletNode(
+  //         audioContext.current,
+  //         NoiseSuppressorWorklet_Name
+  //       );
+  //       workletLoaded.current = true;
+  //     } catch (error) {
+  //       console.error("Error loading RNNoise:", error);
+  //     }
+  //   };
 
-    loadRnnoise(); // Load RNNoise only once
+  //   loadRnnoise(); // Load RNNoise only once
 
-    return () => {
-      if (audioContext.current) {
-        audioContext.current.close();
-      }
-    };
-  }, []);
+  //   return () => {
+  //     if (audioContext.current) {
+  //       audioContext.current.close();
+  //     }
+  //   };
+  // }, []);
 
   const setupPeerConnectionHandlers = () => {
     if (!peerConnection.current) return;
@@ -307,53 +307,53 @@ const VideoCall: React.FC = () => {
 
       // *** RNNoise Integration ***
       let processedStream = stream; // Default to original stream
-      if (
-        rnnoiseNode.current &&
-        audioContext.current &&
-        workletLoaded.current
-      ) {
-        const audioTracks = stream.getAudioTracks();
-        if (audioTracks.length > 0) {
-          const source = audioContext.current.createMediaStreamSource(stream);
-          source.connect(rnnoiseNode.current);
-          rnnoiseNode.current.connect(audioContext.current.destination);
-          processedStream = new MediaStream();
-          // @ts-ignore
-          const rnnoiseOutput = rnnoiseNode.current.stream;
-          rnnoiseOutput
-            .getAudioTracks()
-            // @ts-ignore
-            .forEach((track) => processedStream.addTrack(track));
-          stream
-            .getVideoTracks()
-            .forEach((track) => processedStream.addTrack(track));
+      // if (
+      //   rnnoiseNode.current &&
+      //   audioContext.current &&
+      //   workletLoaded.current
+      // ) {
+      //   const audioTracks = stream.getAudioTracks();
+      //   if (audioTracks.length > 0) {
+      //     const source = audioContext.current.createMediaStreamSource(stream);
+      //     source.connect(rnnoiseNode.current);
+      //     rnnoiseNode.current.connect(audioContext.current.destination);
+      //     processedStream = new MediaStream();
+      //     // @ts-ignore
+      //     const rnnoiseOutput = rnnoiseNode.current.stream;
+      //     rnnoiseOutput
+      //       .getAudioTracks()
+      //       // @ts-ignore
+      //       .forEach((track) => processedStream.addTrack(track));
+      //     stream
+      //       .getVideoTracks()
+      //       .forEach((track) => processedStream.addTrack(track));
 
-          //Stop the old tracks from the original stream
-          stream.getAudioTracks().forEach((track) => track.stop());
-          stream.getVideoTracks().forEach((track) => track.stop());
-        } else {
-          console.warn("No audio track found for RNNoise.");
-        }
-      }
+      //     //Stop the old tracks from the original stream
+      //     stream.getAudioTracks().forEach((track) => track.stop());
+      //     stream.getVideoTracks().forEach((track) => track.stop());
+      //   } else {
+      //     console.warn("No audio track found for RNNoise.");
+      //   }
+      // }
 
-      // 3. Add/Replace Tracks in Peer Connection (ONCE)
-      if (peerConnection.current) {
-        const senders = peerConnection.current.getSenders();
-        processedStream.getTracks().forEach((track) => {
-          const sender = senders.find(
-            (s) => s.track && s.track.kind === track.kind
-          );
-          if (sender) {
-            sender.replaceTrack(track).then(() => {
-              if (peerConnection.current?.signalingState !== "stable") {
-                handleNegotiationNeeded();
-              }
-            }); // Replace track
-          } else {
-            peerConnection?.current?.addTrack(track, processedStream); // Add track (only on initial stream setup)
-          }
-        });
-      }
+      // // 3. Add/Replace Tracks in Peer Connection (ONCE)
+      // if (peerConnection.current) {
+      //   const senders = peerConnection.current.getSenders();
+      //   processedStream.getTracks().forEach((track) => {
+      //     const sender = senders.find(
+      //       (s) => s.track && s.track.kind === track.kind
+      //     );
+      //     if (sender) {
+      //       sender.replaceTrack(track).then(() => {
+      //         if (peerConnection.current?.signalingState !== "stable") {
+      //           handleNegotiationNeeded();
+      //         }
+      //       }); // Replace track
+      //     } else {
+      //       peerConnection?.current?.addTrack(track, processedStream); // Add track (only on initial stream setup)
+      //     }
+      //   });
+      // }
     } catch (error) {
       console.error("Error starting local stream:", error);
       throw error;
