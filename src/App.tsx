@@ -42,77 +42,83 @@ const VideoCall: React.FC = () => {
   const workletLoaded = useRef(false);
   const speexWasmBinaryRef = useRef<ArrayBuffer | null>(null);
 
-useEffect(() => {
-  const loadSpeexWorklet = async () => {
-    console.log("Starting Speex worklet initialization...");
-    
-    try {
-      // Create AudioContext
-      console.log("Creating new AudioContext...");
-      ctx.current = new AudioContext();
-      console.log("AudioContext created successfully:", ctx.current.state);
+  useEffect(() => {
+    const loadSpeexWorklet = async () => {
+      console.log("Starting Speex worklet initialization...");
 
-      // Fetch WASM binary
-      console.log(`Fetching Speex WASM from path: ${speexWasmPath}`);
-      const response = await fetch(speexWasmPath);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch WASM: ${response.status} ${response.statusText}`);
-      }
-      
-      const speexWasmBinary = await response.arrayBuffer();
-      console.log("WASM binary loaded successfully, size:", speexWasmBinary.byteLength);
-      speexWasmBinaryRef.current = speexWasmBinary;
+      try {
+        // Create AudioContext
+        console.log("Creating new AudioContext...");
+        ctx.current = new AudioContext();
+        console.log("AudioContext created successfully:", ctx.current.state);
 
-      // Load AudioWorklet module
-      console.log(`Adding AudioWorklet module from path: ${speexWorkletPath}`);
-      await ctx.current.audioWorklet.addModule(speexWorkletPath);
-      console.log("AudioWorklet module loaded successfully");
-      
-      workletLoaded.current = true;
-      console.log("Speex initialization completed successfully");
-
-    } catch (error: any) {
-      console.error("Speex initialization failed:", {
-        error: error.message,
-        stack: error.stack,
-        context: {
-          audioContextState: ctx.current?.state,
-          workletLoaded: workletLoaded.current,
-          wasmBinaryLoaded: !!speexWasmBinaryRef.current
+        // Fetch WASM binary
+        console.log(`Fetching Speex WASM from path: ${speexWasmPath}`);
+        const response = await fetch(speexWasmPath);
+        if (!response.ok) {
+          throw new Error(
+            `Failed to fetch WASM: ${response.status} ${response.statusText}`
+          );
         }
-      });
-      
-      // You might want to set an error state here
-      // setInitError(error.message);
-    }
-  };
 
-  loadSpeexWorklet();
+        const speexWasmBinary = await response.arrayBuffer();
+        console.log(
+          "WASM binary loaded successfully, size:",
+          speexWasmBinary.byteLength
+        );
+        speexWasmBinaryRef.current = speexWasmBinary;
 
-  return () => {
-    console.log("Cleaning up Speex resources...");
-    
-    if (speex.current) {
-      console.log("Disconnecting Speex node");
-      try {
-        speex.current.disconnect();
-      } catch (error) {
-        console.warn("Error disconnecting Speex node:", error);
+        // Load AudioWorklet module
+        console.log(
+          `Adding AudioWorklet module from path: ${speexWorkletPath}`
+        );
+        await ctx.current.audioWorklet.addModule(speexWorkletPath);
+        console.log("AudioWorklet module loaded successfully");
+
+        workletLoaded.current = true;
+        console.log("Speex initialization completed successfully");
+      } catch (error: any) {
+        console.error("Speex initialization failed:", {
+          error: error.message,
+          stack: error.stack,
+          context: {
+            audioContextState: ctx.current?.state,
+            workletLoaded: workletLoaded.current,
+            wasmBinaryLoaded: !!speexWasmBinaryRef.current,
+          },
+        });
+
+        // You might want to set an error state here
+        // setInitError(error.message);
       }
-    }
-    
-    if (ctx.current) {
-      console.log("Closing AudioContext");
-      try {
-        ctx.current.close();
-      } catch (error) {
-        console.warn("Error closing AudioContext:", error);
-      }
-    }
+    };
 
-    console.log("Cleanup completed");
-  };
-}, []);
+    loadSpeexWorklet();
+
+    return () => {
+      console.log("Cleaning up Speex resources...");
+
+      if (speex.current) {
+        console.log("Disconnecting Speex node");
+        try {
+          speex.current.disconnect();
+        } catch (error) {
+          console.warn("Error disconnecting Speex node:", error);
+        }
+      }
+
+      if (ctx.current) {
+        console.log("Closing AudioContext");
+        try {
+          ctx.current.close();
+        } catch (error) {
+          console.warn("Error closing AudioContext:", error);
+        }
+      }
+
+      console.log("Cleanup completed");
+    };
+  }, []);
 
   useEffect(() => {
     console.log("🔄 Initializing VideoCall component");
@@ -433,12 +439,15 @@ useEffect(() => {
       //     peerConnection.current?.addTrack(track, stream);
       //   });
       // }
-      if (
-        speex.current &&
-        ctx.current &&
-        speexWasmBinaryRef.current &&
-        workletLoaded.current
-      ) {
+
+      console.log("Initialization check:", {
+        speexCurrent: !!speex.current,
+        ctxCurrent: !!ctx.current,
+        wasmBinary: !!speexWasmBinaryRef.current,
+        workletLoaded: workletLoaded.current,
+      });
+
+      if (ctx.current && speexWasmBinaryRef.current && workletLoaded.current) {
         console.log("speex");
         const audioTracks = stream.getAudioTracks();
 
@@ -451,11 +460,16 @@ useEffect(() => {
           const source = ctx.current.createMediaStreamSource(stream);
 
           // Create new Speex node
-          speex.current = new SpeexWorkletNode(ctx.current, {
-            wasmBinary: speexWasmBinaryRef.current,
-            maxChannels: 2,
-          });
-
+          try {
+            speex.current = new SpeexWorkletNode(ctx.current, {
+              wasmBinary: speexWasmBinaryRef.current,
+              maxChannels: 2,
+            });
+            console.log("Speex Node created successfully:", speex.current);
+          } catch (speexError) {
+            console.error("Failed to create SpeexWorkletNode:", speexError);
+            throw speexError;
+          }
           console.log("Speex Node:", speex.current);
 
           // Create a MediaStreamDestination to get the processed audio
@@ -499,7 +513,11 @@ useEffect(() => {
             .forEach((track) => addOrReplaceTrack({ track, stream }));
         }
       } else {
-        console.log(" Fallback to original stream if Speex isn't initialized");
+        console.log("Speex initialization check failed:", {
+          hasContext: !!ctx.current,
+          hasWasmBinary: !!speexWasmBinaryRef.current,
+          isWorkletLoaded: workletLoaded.current,
+        });
         stream
           .getTracks()
           .forEach((track) => addOrReplaceTrack({ track, stream }));
