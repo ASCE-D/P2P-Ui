@@ -448,9 +448,16 @@ const VideoCall: React.FC = () => {
       });
 
       if (ctx.current && speexWasmBinaryRef.current && workletLoaded.current) {
-        console.log("speex");
-        const audioTracks = stream.getAudioTracks();
+        console.log("Starting Speex processing...");
 
+        // First ensure AudioContext is running
+        if (ctx.current.state === "suspended") {
+          console.log("Resuming AudioContext...");
+          await ctx.current.resume();
+          console.log("AudioContext state after resume:", ctx.current.state);
+        }
+
+        const audioTracks = stream.getAudioTracks();
         console.log("Audio Tracks before filter:", audioTracks);
 
         if (audioTracks.length > 0) {
@@ -458,66 +465,82 @@ const VideoCall: React.FC = () => {
 
           // Create source from the original stream
           const source = ctx.current.createMediaStreamSource(stream);
+          console.log(
+            "MediaStreamSource created:",
+            source.channelCount,
+            "channels"
+          );
 
-          // Create new Speex node
           try {
             speex.current = new SpeexWorkletNode(ctx.current, {
               wasmBinary: speexWasmBinaryRef.current,
               maxChannels: 2,
             });
             console.log("Speex Node created successfully:", speex.current);
-          } catch (speexError) {
-            console.error("Failed to create SpeexWorkletNode:", speexError);
-            throw speexError;
-          }
-          console.log("Speex Node:", speex.current);
 
-          // Create a MediaStreamDestination to get the processed audio
-          const audioDestination = ctx.current.createMediaStreamDestination();
+            // Create a MediaStreamDestination to get the processed audio
+            const audioDestination = ctx.current.createMediaStreamDestination();
+            console.log("AudioDestination created");
 
-          // Connect the audio processing chain
-          source.connect(speex.current);
-          speex.current.connect(audioDestination);
+            // Connect the audio processing chain
+            source.connect(speex.current);
+            console.log("Source connected to Speex");
 
-          // Get the processed audio track
-          const processedAudioTrack =
-            audioDestination.stream.getAudioTracks()[0];
+            speex.current.connect(audioDestination);
+            console.log("Speex connected to destination");
 
-          // Create a new MediaStream with processed audio and original video
-          const processedStream = new MediaStream([
-            processedAudioTrack,
-            ...stream.getVideoTracks(),
-          ]);
-
-          console.log("Processed Stream:", processedStream);
-
-          // Add or replace tracks in the peer connection
-          processedStream
-            .getTracks()
-            .forEach((track) =>
-              addOrReplaceTrack({ track, stream: processedStream })
+            // Get the processed audio track
+            const processedAudioTrack =
+              audioDestination.stream.getAudioTracks()[0];
+            console.log(
+              "Processed audio track obtained:",
+              processedAudioTrack.enabled,
+              processedAudioTrack.readyState
             );
 
-          // Optional: Connect to destination for local monitoring
-          // Be careful with this as it might cause echo
-          // speex.current.connect(ctx.current.destination);
+            // Ensure the processed track is enabled
+            if (!processedAudioTrack.enabled) {
+              processedAudioTrack.enabled = true;
+            }
 
-          // Stop the original audio track since we're using the processed one
-          audioTrack.stop();
-        } else {
-          // Fallback to original stream if no audio tracks
-          console.log("Fallback to original stream if no audio tracks");
+            // Create a new MediaStream with processed audio and original video
+            const processedStream = new MediaStream([
+              processedAudioTrack,
+              ...stream.getVideoTracks(),
+            ]);
 
-          stream
-            .getTracks()
-            .forEach((track) => addOrReplaceTrack({ track, stream }));
+            console.log("Processed Stream tracks:", {
+              audio: processedStream.getAudioTracks().length,
+              video: processedStream.getVideoTracks().length,
+            });
+
+            // Add or replace tracks in the peer connection
+            processedStream.getTracks().forEach((track) => {
+              console.log(`Adding/replacing ${track.kind} track:`, {
+                enabled: track.enabled,
+                readyState: track.readyState,
+                muted: track.muted,
+              });
+              addOrReplaceTrack({ track, stream: processedStream });
+            });
+
+            // Only stop the original audio track after confirming the processed one is working
+            if (processedAudioTrack.readyState === "live") {
+              audioTrack.stop();
+              console.log("Original audio track stopped");
+            } else {
+              console.warn("Processed audio track not live, keeping original");
+            }
+          } catch (speexError) {
+            console.error("Error in Speex processing chain:", speexError);
+            // Fallback to original audio if Speex processing fails
+            stream
+              .getTracks()
+              .forEach((track) => addOrReplaceTrack({ track, stream }));
+          }
         }
       } else {
-        console.log("Speex initialization check failed:", {
-          hasContext: !!ctx.current,
-          hasWasmBinary: !!speexWasmBinaryRef.current,
-          isWorkletLoaded: workletLoaded.current,
-        });
+        console.log("Using original stream (Speex not initialized)");
         stream
           .getTracks()
           .forEach((track) => addOrReplaceTrack({ track, stream }));
