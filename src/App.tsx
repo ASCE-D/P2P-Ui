@@ -279,7 +279,12 @@ const VideoCall: React.FC = () => {
     }
   };
 
-  const addOrReplaceTrack = (track, stream) => {
+  interface AddOrReplaceTrackParams {
+    track: MediaStreamTrack;
+    stream: MediaStream;
+  }
+
+  const addOrReplaceTrack = ({ track, stream }: AddOrReplaceTrackParams) => {
     if (!peerConnection.current) return;
 
     const senders = peerConnection.current.getSenders();
@@ -387,7 +392,9 @@ const VideoCall: React.FC = () => {
           // 6. Add/Replace Tracks in Peer Connection
           processedStream
             .getTracks()
-            .forEach((track) => addOrReplaceTrack(track, processedStream));
+            .forEach((track) =>
+              addOrReplaceTrack({ track, stream: processedStream })
+            );
 
           // 7. Stop original audio track
           audioTrack.stop();
@@ -395,11 +402,13 @@ const VideoCall: React.FC = () => {
           console.warn("No audio track found for RNNoise processing.");
           stream
             .getTracks()
-            .forEach((track) => addOrReplaceTrack(track, stream)); // Add original tracks
+            .forEach((track) => addOrReplaceTrack({ track, stream })); // Add original tracks
         }
       } else {
         console.log("RNNoise not loaded. Using original stream.");
-        stream.getTracks().forEach((track) => addOrReplaceTrack(track, stream)); // Add original tracks
+        stream
+          .getTracks()
+          .forEach((track) => addOrReplaceTrack({ track, stream })); // Add original tracks
       }
     } catch (error) {
       console.error("Error starting local stream:", error);
