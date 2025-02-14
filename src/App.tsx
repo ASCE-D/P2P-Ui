@@ -409,8 +409,8 @@ const VideoCall: React.FC = () => {
         audio: {
           deviceId: devices.selectedAudioInput,
           echoCancellation: true,
-          noiseSuppression: false, // RNNoise handles noise suppression
-          autoGainControl: true,
+          noiseSuppression: true, // RNNoise handles noise suppression
+          autoGainControl: false,
         },
         video: {
           deviceId: devices.selectedVideoInput,
