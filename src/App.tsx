@@ -28,7 +28,7 @@ const VideoCall: React.FC = () => {
     `User_${Math.floor(Math.random() * 1000)}`
   );
   const [isCalling, setIsCalling] = useState(false);
-  const [isTestAudioMuted, setIsTestAudioMuted] = useState(true);
+  const [isTestAudioMuted, setIsTestAudioMuted] = useState(false);
 
   const peerConnection = useRef<RTCPeerConnection | null>(null);
   const socket = useRef<Socket | null>(null);
@@ -509,10 +509,10 @@ const VideoCall: React.FC = () => {
             });
 
             // Add a volume meter for visual feedback
-            const audioContext = new AudioContext();
-            const analyser = audioContext.createAnalyser();
-            const source2 = audioContext.createMediaStreamSource(testStream);
-            source2.connect(analyser);
+           const audioContext = ctx.current;
+           const analyser = audioContext.createAnalyser();
+           const source2 = audioContext.createMediaStreamSource(testStream);
+           source2.connect(analyser);
 
             analyser.fftSize = 256;
             const dataArray = new Uint8Array(analyser.frequencyBinCount);
