@@ -69,31 +69,31 @@ const VideoCall: React.FC = () => {
     }
   }, [userId, socketId]);
 
-  // useEffect(() => {
-  //   const loadRnnoise = async () => {
-  //     try {
-  //       audioContext.current = new AudioContext();
-  //       await audioContext.current.audioWorklet.addModule(
-  //         NoiseSuppressorWorklet
-  //       );
-  //       rnnoiseNode.current = new AudioWorkletNode(
-  //         audioContext.current,
-  //         NoiseSuppressorWorklet_Name
-  //       );
-  //       workletLoaded.current = true;
-  //     } catch (error) {
-  //       console.error("Error loading RNNoise:", error);
-  //     }
-  //   };
+  useEffect(() => {
+    const loadRnnoise = async () => {
+      try {
+        audioContext.current = new AudioContext();
+        await audioContext.current.audioWorklet.addModule(
+          NoiseSuppressorWorklet
+        );
+        rnnoiseNode.current = new AudioWorkletNode(
+          audioContext.current,
+          NoiseSuppressorWorklet_Name
+        );
+        workletLoaded.current = true;
+      } catch (error) {
+        console.error("Error loading RNNoise:", error);
+      }
+    };
 
-  //   loadRnnoise(); // Load RNNoise only once
+    loadRnnoise(); // Load RNNoise only once
 
-  //   return () => {
-  //     if (audioContext.current) {
-  //       audioContext.current.close();
-  //     }
-  //   };
-  // }, []);
+    return () => {
+      if (audioContext.current) {
+        audioContext.current.close();
+      }
+    };
+  }, []);
 
   const setupPeerConnectionHandlers = () => {
     if (!peerConnection.current) return;
