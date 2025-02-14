@@ -3,7 +3,6 @@ import { Socket, io } from "socket.io-client";
 import { DeviceSelectionState, CallState, User } from "./types";
 import { NoiseSuppressorWorklet_Name } from "@timephy/rnnoise-wasm";
 import NoiseSuppressorWorklet from "@timephy/rnnoise-wasm/NoiseSuppressorWorklet?worker&url";
-import AudioDebugger from "./components/AudioDebugger";
 
 const VideoCall: React.FC = () => {
   const [devices, setDevices] = useState<DeviceSelectionState>({
@@ -589,11 +588,6 @@ const VideoCall: React.FC = () => {
           Start Camera
         </button>
       </div>
-      <AudioDebugger
-        stream={callState.localStream}
-        rnnoiseNode={rnnoiseNode.current}
-        audioContext={audioContext.current}
-      />
     </div>
   );
 };
