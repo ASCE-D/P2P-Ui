@@ -28,6 +28,7 @@ const VideoCall: React.FC = () => {
     `User_${Math.floor(Math.random() * 1000)}`
   );
   const [isCalling, setIsCalling] = useState(false);
+  const [isTestAudioMuted, setIsTestAudioMuted] = useState(true);
 
   const peerConnection = useRef<RTCPeerConnection | null>(null);
   const socket = useRef<Socket | null>(null);
@@ -397,132 +398,174 @@ const VideoCall: React.FC = () => {
     }
   };
 
-const startLocalStream = async () => {
-  try {
-    if (callState.localStream) {
-      callState.localStream.getTracks().forEach((track) => track.stop());
-    }
-
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        deviceId: devices.selectedAudioInput,
-        echoCancellation: true,
-        noiseSuppression: false, // RNNoise handles noise suppression
-        autoGainControl: true,
-      },
-      video: {
-        deviceId: devices.selectedVideoInput,
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-      },
-    });
-
-    if (!stream) {
-      console.error("getUserMedia returned undefined.");
-      alert("Unable to access camera or microphone.");
-      return;
-    }
-
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = stream;
-    }
-
-    setCallState((prev) => ({ ...prev, localStream: stream }));
-
-    console.log("Audio Tracks:", stream.getAudioTracks());
-    console.log("Video Tracks:", stream.getVideoTracks());
-
-    console.log("Initialization check:", {
-      speexCurrent: !!speex.current,
-      ctxCurrent: !!ctx.current,
-      wasmBinary: !!speexWasmBinaryRef.current,
-      workletLoaded: workletLoaded.current,
-    });
-
-    if (ctx.current && speexWasmBinaryRef.current && workletLoaded.current) {
-      console.log("Starting Speex processing...");
-
-      if (ctx.current.state === "suspended") {
-        console.log("Resuming AudioContext...");
-        await ctx.current.resume();
-        console.log("AudioContext state after resume:", ctx.current.state);
+  const startLocalStream = async () => {
+    try {
+      if (callState.localStream) {
+        callState.localStream.getTracks().forEach((track) => track.stop());
       }
 
-      const audioTracks = stream.getAudioTracks();
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: devices.selectedAudioInput,
+          echoCancellation: true,
+          noiseSuppression: false, // RNNoise handles noise suppression
+          autoGainControl: true,
+        },
+        video: {
+          deviceId: devices.selectedVideoInput,
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+      });
 
-      if (audioTracks.length > 0) {
-        const audioTrack = audioTracks[0];
-        const source = ctx.current.createMediaStreamSource(stream);
-        console.log(
-          "MediaStreamSource created:",
-          source.channelCount,
-          "channels"
-        );
+      if (!stream) {
+        console.error("getUserMedia returned undefined.");
+        alert("Unable to access camera or microphone.");
+        return;
+      }
 
-        try {
-          speex.current = new SpeexWorkletNode(ctx.current, {
-            wasmBinary: speexWasmBinaryRef.current,
-            maxChannels: 2,
-          });
-          console.log("Speex Node created successfully:", speex.current);
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+      }
 
-          const audioDestination = ctx.current.createMediaStreamDestination();
-          console.log("AudioDestination created");
+      setCallState((prev) => ({ ...prev, localStream: stream }));
 
-          source.connect(speex.current);
-          console.log("Source connected to Speex");
+      console.log("Audio Tracks:", stream.getAudioTracks());
+      console.log("Video Tracks:", stream.getVideoTracks());
 
-          speex.current.connect(audioDestination);
-          console.log("Speex connected to destination");
+      console.log("Initialization check:", {
+        speexCurrent: !!speex.current,
+        ctxCurrent: !!ctx.current,
+        wasmBinary: !!speexWasmBinaryRef.current,
+        workletLoaded: workletLoaded.current,
+      });
 
-          const processedAudioTrack =
-            audioDestination.stream.getAudioTracks()[0];
+      if (ctx.current && speexWasmBinaryRef.current && workletLoaded.current) {
+        console.log("Starting Speex processing...");
+
+        if (ctx.current.state === "suspended") {
+          console.log("Resuming AudioContext...");
+          await ctx.current.resume();
+          console.log("AudioContext state after resume:", ctx.current.state);
+        }
+
+        const audioTracks = stream.getAudioTracks();
+
+        if (audioTracks.length > 0) {
+          const audioTrack = audioTracks[0];
+          const source = ctx.current.createMediaStreamSource(stream);
           console.log(
-            "Processed audio track obtained:",
-            processedAudioTrack.enabled,
-            processedAudioTrack.readyState
+            "MediaStreamSource created:",
+            source.channelCount,
+            "channels"
           );
 
-          const processedStream = new MediaStream([
-            processedAudioTrack,
-            ...stream.getVideoTracks(),
-          ]);
-
-          console.log("Processed Stream tracks:", {
-            audio: processedStream.getAudioTracks().length,
-            video: processedStream.getVideoTracks().length,
-          });
-
-          processedStream.getTracks().forEach((track) => {
-            console.log(`Adding/replacing ${track.kind} track:`, {
-              enabled: track.enabled,
-              readyState: track.readyState,
-              muted: track.muted,
+          try {
+            speex.current = new SpeexWorkletNode(ctx.current, {
+              wasmBinary: speexWasmBinaryRef.current,
+              maxChannels: 2,
             });
-            addOrReplaceTrack({ track, stream: processedStream });
-          });
+            console.log("Speex Node created successfully:", speex.current);
 
-          // Stop original track AFTER adding the processed one
-          audioTrack.stop(); // Moved this line up
-          console.log("Original audio track stopped");
-        } catch (speexError) {
-          console.error("Error in Speex processing chain:", speexError);
-          stream
-            .getTracks()
-            .forEach((track) => addOrReplaceTrack({ track, stream }));
+            const audioDestination = ctx.current.createMediaStreamDestination();
+            console.log("AudioDestination created");
+
+            source.connect(speex.current);
+            console.log("Source connected to Speex");
+
+            speex.current.connect(audioDestination);
+            console.log("Speex connected to destination");
+
+            const processedAudioTrack =
+              audioDestination.stream.getAudioTracks()[0];
+            console.log(
+              "Processed audio track obtained:",
+              processedAudioTrack.enabled,
+              processedAudioTrack.readyState
+            );
+
+            // Create a test audio element
+            const testAudio = document.createElement("audio");
+            testAudio.id = "processed-audio-test";
+            testAudio.autoplay = true;
+            testAudio.muted = isTestAudioMuted; // Use the React state
+            document.body.appendChild(testAudio);
+
+            // Create a stream with only processed audio for testing
+            const testStream = new MediaStream([processedAudioTrack]);
+            testAudio.srcObject = testStream;
+
+            console.log("Test audio element created and stream attached");
+
+            // Create processed stream for peer connection
+            const processedStream = new MediaStream([
+              processedAudioTrack,
+              ...stream.getVideoTracks(),
+            ]);
+
+            console.log("Processed Stream tracks:", {
+              audio: processedStream.getAudioTracks().length,
+              video: processedStream.getVideoTracks().length,
+            });
+
+            // Add a volume meter for visual feedback
+            const audioContext = new AudioContext();
+            const analyser = audioContext.createAnalyser();
+            const source2 = audioContext.createMediaStreamSource(testStream);
+            source2.connect(analyser);
+
+            analyser.fftSize = 256;
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+            function checkAudioLevel() {
+              analyser.getByteFrequencyData(dataArray);
+              const average =
+                dataArray.reduce((a, b) => a + b) / dataArray.length;
+              console.log("Audio level:", average);
+
+              requestAnimationFrame(checkAudioLevel);
+            }
+
+            checkAudioLevel();
+
+            // Rest of your code for peer connection...
+            processedStream.getTracks().forEach((track) => {
+              console.log(`Adding/replacing ${track.kind} track:`, {
+                enabled: track.enabled,
+                readyState: track.readyState,
+                muted: track.muted,
+              });
+              addOrReplaceTrack({ track, stream: processedStream });
+            });
+
+            if (processedAudioTrack.readyState === "live") {
+              audioTrack.stop();
+              console.log("Original audio track stopped");
+            }
+
+            // Cleanup function
+            return () => {
+              testAudio.remove();
+              audioContext.close();
+            };
+          } catch (speexError) {
+            console.error("Error in Speex processing chain:", speexError);
+            stream
+              .getTracks()
+              .forEach((track) => addOrReplaceTrack({ track, stream }));
+          }
         }
+      } else {
+        console.log("Using original stream (Speex not initialized)");
+        stream
+          .getTracks()
+          .forEach((track) => addOrReplaceTrack({ track, stream }));
       }
-    } else {
-      console.log("Using original stream (Speex not initialized)");
-      stream
-        .getTracks()
-        .forEach((track) => addOrReplaceTrack({ track, stream }));
+    } catch (error) {
+      console.error("Error starting local stream:", error);
+      throw error;
     }
-  } catch (error) {
-    console.error("Error starting local stream:", error);
-    throw error;
-  }
-};
+  };
 
   const handleNegotiationNeeded = async () => {
     try {
@@ -695,10 +738,27 @@ const startLocalStream = async () => {
         >
           Start Camera
         </button>
+        <button
+          onClick={() => {
+            const testAudio = document.getElementById("processed-audio-test");
+            if (testAudio) {
+              const newMutedState = !(testAudio as HTMLMediaElement).muted;
+              (testAudio as HTMLMediaElement).muted = newMutedState;
+              setIsTestAudioMuted(newMutedState);
+              console.log("Test audio muted:", newMutedState);
+            }
+          }}
+          className="px-4 py-2 bg-green-500 text-white rounded"
+        >
+          {isTestAudioMuted ? "Unmute Test Audio" : "Mute Test Audio"}
+        </button>
+        <button
+          className="px-4 py-2 bg-red-600 text-white rounded"
+          onClick={endCall}
+        >
+          End call
+        </button>
       </div>
-      <button className="bg-red-600 text-white" onClick={endCall}>
-        End call
-      </button>
     </div>
   );
 };
