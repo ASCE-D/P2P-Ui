@@ -279,6 +279,35 @@ const VideoCall: React.FC = () => {
     }
   };
 
+  const addOrReplaceTrack = (track, stream) => {
+    if (!peerConnection.current) return;
+
+    const senders = peerConnection.current.getSenders();
+    const sender = senders.find((s) => s.track && s.track.kind === track.kind);
+
+    if (sender) {
+      sender
+        .replaceTrack(track)
+        .then(() => {
+          if (peerConnection.current?.signalingState !== "stable") {
+            handleNegotiationNeeded();
+          }
+          console.log(`Replaced ${track.kind} track`);
+        })
+        .catch((error) => {
+          console.error(`Error replacing ${track.kind} track:`, error);
+          // Handle error appropriately (e.g., alert the user)
+        });
+    } else {
+      try {
+        peerConnection.current.addTrack(track, stream);
+      } catch (error) {
+        console.error(`Error adding ${track.kind} track:`, error);
+        // Handle error appropriately
+      }
+    }
+  };
+
   const startLocalStream = async () => {
     try {
       if (callState.localStream) {
@@ -288,8 +317,8 @@ const VideoCall: React.FC = () => {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           deviceId: devices.selectedAudioInput,
-          echoCancellation: true,
-          noiseSuppression: true, // Keep noise suppression here for initial getUserMedia
+          echoCancellation: true, // Keep echo cancellation
+          noiseSuppression: false, // Turn off browser noise suppression, RNNoise handles it
           autoGainControl: true,
         },
         video: {
@@ -298,6 +327,12 @@ const VideoCall: React.FC = () => {
           height: { ideal: 720 },
         },
       });
+
+      if (!stream) {
+        console.error("getUserMedia returned undefined.");
+        alert("Unable to access camera or microphone.");
+        return;
+      }
 
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
@@ -309,62 +344,63 @@ const VideoCall: React.FC = () => {
       console.log("Video Tracks:", stream.getVideoTracks()); // Check tracks immediately
 
       // *** Simplified Track Addition (NO RNNoise, NO replaceTrack) ***
-      if (peerConnection.current) {
-        stream.getTracks().forEach((track) => {
-          console.log("Adding Track:", track); // Log before adding
-          peerConnection.current?.addTrack(track, stream);
-        });
-      }
-
-      // *** RNNoise Integration ***
-      let processedStream = stream; // Default to original stream
-      // if (
-      //   rnnoiseNode.current &&
-      //   audioContext.current &&
-      //   workletLoaded.current
-      // ) {
-      //   const audioTracks = stream.getAudioTracks();
-      //   if (audioTracks.length > 0) {
-      //     const source = audioContext.current.createMediaStreamSource(stream);
-      //     source.connect(rnnoiseNode.current);
-      //     rnnoiseNode.current.connect(audioContext.current.destination);
-      //     processedStream = new MediaStream();
-      //     // @ts-ignore
-      //     const rnnoiseOutput = rnnoiseNode.current.stream;
-      //     rnnoiseOutput
-      //       .getAudioTracks()
-      //       // @ts-ignore
-      //       .forEach((track) => processedStream.addTrack(track));
-      //     stream
-      //       .getVideoTracks()
-      //       .forEach((track) => processedStream.addTrack(track));
-
-      //     //Stop the old tracks from the original stream
-      //     stream.getAudioTracks().forEach((track) => track.stop());
-      //     stream.getVideoTracks().forEach((track) => track.stop());
-      //   } else {
-      //     console.warn("No audio track found for RNNoise.");
-      //   }
-      // }
-
-      // // 3. Add/Replace Tracks in Peer Connection (ONCE)
       // if (peerConnection.current) {
-      //   const senders = peerConnection.current.getSenders();
-      //   processedStream.getTracks().forEach((track) => {
-      //     const sender = senders.find(
-      //       (s) => s.track && s.track.kind === track.kind
-      //     );
-      //     if (sender) {
-      //       sender.replaceTrack(track).then(() => {
-      //         if (peerConnection.current?.signalingState !== "stable") {
-      //           handleNegotiationNeeded();
-      //         }
-      //       }); // Replace track
-      //     } else {
-      //       peerConnection?.current?.addTrack(track, processedStream); // Add track (only on initial stream setup)
-      //     }
+      //   stream.getTracks().forEach((track) => {
+      //     console.log("Adding Track:", track); // Log before adding
+      //     peerConnection.current?.addTrack(track, stream);
       //   });
       // }
+
+      // *** RNNoise Integration ***
+      if (
+        rnnoiseNode.current &&
+        audioContext.current &&
+        workletLoaded.current
+      ) {
+        const audioTracks = stream.getAudioTracks();
+        if (audioTracks.length > 0) {
+          const audioTrack = audioTracks[0]; // Get the first audio track
+
+          // 1. Create Source Node
+          const source = audioContext.current.createMediaStreamSource(stream);
+
+          // 2. Connect Source to RNNoise Node
+          source.connect(rnnoiseNode.current);
+
+          // 3. Create Destination (for processed audio)
+          const destination =
+            audioContext.current.createMediaStreamDestination();
+
+          // 4. Connect RNNoise to Destination
+          rnnoiseNode.current.connect(destination);
+
+          // 5. Create new processed stream
+          const processedStream = new MediaStream([
+            destination.stream.getAudioTracks()[0],
+            ...stream.getVideoTracks(),
+          ]);
+
+          console.log(
+            "Processed Audio Tracks:",
+            processedStream.getAudioTracks()
+          );
+          // 6. Add/Replace Tracks in Peer Connection
+          processedStream
+            .getTracks()
+            .forEach((track) => addOrReplaceTrack(track, processedStream));
+
+          // 7. Stop original audio track
+          audioTrack.stop();
+        } else {
+          console.warn("No audio track found for RNNoise processing.");
+          stream
+            .getTracks()
+            .forEach((track) => addOrReplaceTrack(track, stream)); // Add original tracks
+        }
+      } else {
+        console.log("RNNoise not loaded. Using original stream.");
+        stream.getTracks().forEach((track) => addOrReplaceTrack(track, stream)); // Add original tracks
+      }
     } catch (error) {
       console.error("Error starting local stream:", error);
       throw error;
