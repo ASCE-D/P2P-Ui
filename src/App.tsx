@@ -465,6 +465,10 @@ const VideoCall: React.FC = () => {
               wasmBinary: speexWasmBinaryRef.current,
               maxChannels: 2,
             });
+
+            speex.current.onprocessorerror = (e) => {
+              console.error("Speex Worklet Error:", e);
+            };
             console.log("Speex Node created successfully:", speex.current);
 
             const audioDestination = ctx.current.createMediaStreamDestination();
@@ -522,19 +526,33 @@ const VideoCall: React.FC = () => {
             const source2 = audioContext.createMediaStreamSource(testStream);
             source2.connect(analyser);
 
-            analyser.fftSize = 256;
+            analyser.fftSize = 2048; // Increased resolution
+            analyser.smoothingTimeConstant = 0.2; // Less smoothing
             const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
             function checkAudioLevel() {
-              analyser.getByteFrequencyData(dataArray);
-              const average =
-                dataArray.reduce((a, b) => a + b) / dataArray.length;
-              console.log("Audio level:", average);
+              // Get time domain data instead of frequency
+              analyser.getByteTimeDomainData(dataArray);
+              const max = Math.max(...dataArray);
+              const min = Math.min(...dataArray);
+              const amplitude = max - min;
+              console.log("Audio waveform amplitude:", amplitude);
+
+              // Visual feedback
+              const visualizer = document.getElementById("audio-visualizer");
+              if (visualizer) {
+                visualizer.style.width = `${Math.abs(amplitude)}%`;
+              }
 
               requestAnimationFrame(checkAudioLevel);
             }
-
             checkAudioLevel();
+
+            testAudio.onplaying = () => {
+              console.log("✅ Test audio is actually playing");
+              testAudio.volume = 0.1; // Prevent feedback
+            };
+            testAudio.onerror = (e) => console.error("Test audio error:", e);
 
             // Rest of your code for peer connection...
             processedStream.getTracks().forEach((track) => {
