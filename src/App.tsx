@@ -42,33 +42,77 @@ const VideoCall: React.FC = () => {
   const workletLoaded = useRef(false);
   const speexWasmBinaryRef = useRef<ArrayBuffer | null>(null);
 
-  useEffect(() => {
-    const loadSpeexWorklet = async () => {
+useEffect(() => {
+  const loadSpeexWorklet = async () => {
+    console.log("Starting Speex worklet initialization...");
+    
+    try {
+      // Create AudioContext
+      console.log("Creating new AudioContext...");
+      ctx.current = new AudioContext();
+      console.log("AudioContext created successfully:", ctx.current.state);
+
+      // Fetch WASM binary
+      console.log(`Fetching Speex WASM from path: ${speexWasmPath}`);
+      const response = await fetch(speexWasmPath);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch WASM: ${response.status} ${response.statusText}`);
+      }
+      
+      const speexWasmBinary = await response.arrayBuffer();
+      console.log("WASM binary loaded successfully, size:", speexWasmBinary.byteLength);
+      speexWasmBinaryRef.current = speexWasmBinary;
+
+      // Load AudioWorklet module
+      console.log(`Adding AudioWorklet module from path: ${speexWorkletPath}`);
+      await ctx.current.audioWorklet.addModule(speexWorkletPath);
+      console.log("AudioWorklet module loaded successfully");
+      
+      workletLoaded.current = true;
+      console.log("Speex initialization completed successfully");
+
+    } catch (error: any) {
+      console.error("Speex initialization failed:", {
+        error: error.message,
+        stack: error.stack,
+        context: {
+          audioContextState: ctx.current?.state,
+          workletLoaded: workletLoaded.current,
+          wasmBinaryLoaded: !!speexWasmBinaryRef.current
+        }
+      });
+      
+      // You might want to set an error state here
+      // setInitError(error.message);
+    }
+  };
+
+  loadSpeexWorklet();
+
+  return () => {
+    console.log("Cleaning up Speex resources...");
+    
+    if (speex.current) {
+      console.log("Disconnecting Speex node");
       try {
-        ctx.current = new AudioContext();
-
-        const response = await fetch(speexWasmPath);
-        const speexWasmBinary = await response.arrayBuffer();
-        speexWasmBinaryRef.current = speexWasmBinary;
-
-        await ctx.current.audioWorklet.addModule(speexWorkletPath);
-        workletLoaded.current = true;
+        speex.current.disconnect();
       } catch (error) {
-        console.error("Error loading Speex worklet:", error);
+        console.warn("Error disconnecting Speex node:", error);
       }
-    };
+    }
+    
+    if (ctx.current) {
+      console.log("Closing AudioContext");
+      try {
+        ctx.current.close();
+      } catch (error) {
+        console.warn("Error closing AudioContext:", error);
+      }
+    }
 
-    loadSpeexWorklet();
-
-    return () => {
-      if (speex.current) {
-        speex.current.disconnect(); // Disconnect Speex node
-      }
-      if (ctx.current) {
-        ctx.current.close(); // Close AudioContext
-      }
-    };
-  }, []);
+    console.log("Cleanup completed");
+  };
+}, []);
 
   useEffect(() => {
     console.log("🔄 Initializing VideoCall component");
@@ -638,6 +682,9 @@ const VideoCall: React.FC = () => {
           Start Camera
         </button>
       </div>
+      <button className="bg-red-600 text-white" onClick={endCall}>
+        End call
+      </button>
     </div>
   );
 };
