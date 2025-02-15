@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
+import { useAudioProcessing } from "./useAudioProcessing";
 import { Socket, io } from "socket.io-client";
 import { DeviceSelectionState, CallState, User } from "./types";
 import { SpeexWorkletNode } from "@sapphi-red/web-noise-suppressor";
@@ -35,92 +35,13 @@ const VideoCall: React.FC = () => {
   const socket = useRef<Socket | null>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
-  const rnnoiseNode = useRef<AudioWorkletNode | null>(null);
-  const audioContext = useRef<AudioContext | null>(null);
-  // const workletLoaded = useRef(false); // Track worklet loading
+  const streamRef = useRef<MediaStream | null>(null);
 
-  const speex = useRef<SpeexWorkletNode | null>(null);
-  const ctx = useRef<AudioContext | null>(null);
-  const workletLoaded = useRef(false);
-  const speexWasmBinaryRef = useRef<ArrayBuffer | null>(null);
-
-  useEffect(() => {
-    const loadSpeexWorklet = async () => {
-      console.log("Starting Speex worklet initialization...");
-
-      try {
-        // Create AudioContext
-        console.log("Creating new AudioContext...");
-        ctx.current = new AudioContext();
-        console.log("AudioContext created successfully:", ctx.current.state);
-
-        // Fetch WASM binary
-        console.log(`Fetching Speex WASM from path: ${speexWasmPath}`);
-        const response = await fetch(speexWasmPath);
-        if (!response.ok) {
-          throw new Error(
-            `Failed to fetch WASM: ${response.status} ${response.statusText}`
-          );
-        }
-
-        const speexWasmBinary = await response.arrayBuffer();
-        console.log(
-          "WASM binary loaded successfully, size:",
-          speexWasmBinary.byteLength
-        );
-        speexWasmBinaryRef.current = speexWasmBinary;
-
-        // Load AudioWorklet module
-        console.log(
-          `Adding AudioWorklet module from path: ${speexWorkletPath}`
-        );
-        await ctx.current.audioWorklet.addModule(speexWorkletPath);
-        console.log("AudioWorklet module loaded successfully");
-
-        workletLoaded.current = true;
-        console.log("Speex initialization completed successfully");
-      } catch (error: any) {
-        console.error("Speex initialization failed:", {
-          error: error.message,
-          stack: error.stack,
-          context: {
-            audioContextState: ctx.current?.state,
-            workletLoaded: workletLoaded.current,
-            wasmBinaryLoaded: !!speexWasmBinaryRef.current,
-          },
-        });
-
-        // You might want to set an error state here
-        // setInitError(error.message);
-      }
-    };
-
-    loadSpeexWorklet();
-
-    return () => {
-      console.log("Cleaning up Speex resources...");
-
-      if (speex.current) {
-        console.log("Disconnecting Speex node");
-        try {
-          speex.current.disconnect();
-        } catch (error) {
-          console.warn("Error disconnecting Speex node:", error);
-        }
-      }
-
-      if (ctx.current) {
-        console.log("Closing AudioContext");
-        try {
-          ctx.current.close();
-        } catch (error) {
-          console.warn("Error closing AudioContext:", error);
-        }
-      }
-
-      console.log("Cleanup completed");
-    };
-  }, []);
+  // const { isProcessing, error } = useAudioProcessing({
+  //   peerConnection: peerConnection.current,
+  //   stream: streamRef.current,
+  //   enabled: true, // you can control when processing is enabled
+  // });
 
   useEffect(() => {
     console.log("🔄 Initializing VideoCall component");
@@ -154,32 +75,6 @@ const VideoCall: React.FC = () => {
       socket.current.emit("register", { userId, socketId: socket.current.id });
     }
   }, [userId, socketId]);
-
-  // useEffect(() => {
-  //   const loadRnnoise = async () => {
-  //     try {
-  //       audioContext.current = new AudioContext();
-  //       await audioContext.current.audioWorklet.addModule(
-  //         NoiseSuppressorWorklet
-  //       );
-  //       rnnoiseNode.current = new AudioWorkletNode(
-  //         audioContext.current,
-  //         NoiseSuppressorWorklet_Name
-  //       );
-  //       workletLoaded.current = true;
-  //     } catch (error) {
-  //       console.error("Error loading RNNoise:", error);
-  //     }
-  //   };
-
-  //   loadRnnoise(); // Load RNNoise only once
-
-  //   return () => {
-  //     if (audioContext.current) {
-  //       audioContext.current.close();
-  //     }
-  //   };
-  // }, []);
 
   const setupPeerConnectionHandlers = () => {
     if (!peerConnection.current) return;
@@ -408,8 +303,8 @@ const VideoCall: React.FC = () => {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           deviceId: devices.selectedAudioInput,
-          echoCancellation: true,
-          noiseSuppression: true, // RNNoise handles noise suppression
+          echoCancellation: false,
+          noiseSuppression: false, // RNNoise handles noise suppression
           autoGainControl: false,
         },
         video: {
@@ -431,20 +326,24 @@ const VideoCall: React.FC = () => {
 
       setCallState((prev) => ({ ...prev, localStream: stream }));
 
-      console.log("Audio Tracks:", stream.getAudioTracks());
-      console.log("Video Tracks:", stream.getVideoTracks());
-
-      setCallState((prev) => ({ ...prev, localStream: stream }));
-
       console.log("Audio Tracks:", stream.getAudioTracks()); // Check tracks immediately
       console.log("Video Tracks:", stream.getVideoTracks()); // Check tracks immediately
 
-      // *** Simplified Track Addition (NO RNNoise, NO replaceTrack) ***
-      if (peerConnection.current) {
-        stream.getTracks().forEach((track) => {
-          console.log("Adding Track:", track); // Log before adding
-          peerConnection.current?.addTrack(track, stream);
-        });
+      const { isProcessing, error } = useAudioProcessing({
+        peerConnection: peerConnection.current,
+        stream: stream,
+        enabled: true, // You might want to make this configurable
+      });
+
+      if (error) {
+        console.error("Error in audio processing:", error);
+        // Fallback to unprocessed audio if noise suppression fails
+        if (peerConnection.current) {
+          stream.getTracks().forEach((track) => {
+            console.log("Adding unprocessed track (fallback):", track);
+            peerConnection.current?.addTrack(track, stream);
+          });
+        }
       }
     } catch (error) {
       console.error("Error starting local stream:", error);
