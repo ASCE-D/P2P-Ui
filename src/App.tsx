@@ -1,10 +1,16 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useAudioProcessing } from "./useAudioProcessing";
+import {
+  loadSpeex,
+  SpeexWorkletNode,
+  loadRnnoise,
+  RnnoiseWorkletNode,
+} from "@sapphi-red/web-noise-suppressor";
 import { Socket, io } from "socket.io-client";
 import { DeviceSelectionState, CallState, User } from "./types";
-import { SpeexWorkletNode } from "@sapphi-red/web-noise-suppressor";
-import speexWorkletPath from "@sapphi-red/web-noise-suppressor/speexWorklet.js?url";
-import speexWasmPath from "@sapphi-red/web-noise-suppressor/speex.wasm?url";
+import rnnoiseWasmPath from "@sapphi-red/web-noise-suppressor/rnnoise.wasm?url";
+import rnnoiseWasmSimdPath from "@sapphi-red/web-noise-suppressor/rnnoise_simd.wasm?url";
+import rnnoiseWorkletPath from "@sapphi-red/web-noise-suppressor/rnnoiseWorklet.js?url";
 
 const VideoCall: React.FC = () => {
   const [devices, setDevices] = useState<DeviceSelectionState>({
@@ -329,21 +335,44 @@ const VideoCall: React.FC = () => {
       console.log("Audio Tracks:", stream.getAudioTracks()); // Check tracks immediately
       console.log("Video Tracks:", stream.getVideoTracks()); // Check tracks immediately
 
-      const { isProcessing, error } = useAudioProcessing({
-        peerConnection: peerConnection.current,
-        stream: stream,
-        enabled: true, // You might want to make this configurable
+      const audioContext = new AudioContext(); // Create audio context here
+      const rnnoiseWasmBinary = await loadRnnoise({
+        url: rnnoiseWasmPath,
+        simdUrl: rnnoiseWasmSimdPath,
       });
+      await audioContext.audioWorklet.addModule(rnnoiseWorkletPath);
+      const rnnoiseNode = new RnnoiseWorkletNode(audioContext, {
+        wasmBinary: rnnoiseWasmBinary,
+        maxChannels: 2,
+      });
+      const sourceNode = audioContext.createMediaStreamSource(stream);
+      const gainNode = audioContext.createGain(); // Keep gain node for potential volume control
+      gainNode.gain.value = 1;
 
-      if (error) {
-        console.error("Error in audio processing:", error);
-        // Fallback to unprocessed audio if noise suppression fails
-        if (peerConnection.current) {
-          stream.getTracks().forEach((track) => {
-            console.log("Adding unprocessed track (fallback):", track);
-            peerConnection.current?.addTrack(track, stream);
-          });
-        }
+      sourceNode.connect(rnnoiseNode);
+      rnnoiseNode.connect(gainNode);
+      // gainNode.connect(audioContext.destination); // Optional: For local playback
+
+      // 1. Create a MediaStreamAudioDestinationNode
+      const destination = audioContext.createMediaStreamDestination();
+
+      // 2. Connect the gainNode (or rnnoiseNode directly if no gain control) to the destination
+      gainNode.connect(destination); // or rnnoiseNode.connect(destination);
+
+      // 3. Get the processed MediaStream track from the destination
+      const processedAudioTrack = destination.stream.getAudioTracks()[0];
+
+      // 4. Replace the original track in the getUserMedia stream
+      const originalAudioTrack = stream.getAudioTracks()[0];
+      stream.removeTrack(originalAudioTrack);
+      stream.addTrack(processedAudioTrack);
+
+      // Add the *modified* stream to the peer connection
+      if (peerConnection.current) {
+        stream.getTracks().forEach((track) => {
+          console.log("Adding processed track:", track);
+          peerConnection.current?.addTrack(track, stream);
+        });
       }
     } catch (error) {
       console.error("Error starting local stream:", error);
