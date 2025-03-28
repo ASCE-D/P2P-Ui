@@ -52,7 +52,7 @@ const VideoCall: React.FC = () => {
   useEffect(() => {
     console.log("🔄 Initializing VideoCall component");
 
-    socket.current = io("http://localhost:3000");
+    socket.current = io("https://signaling-nodejs.onrender.com");
 
     peerConnection.current = new RTCPeerConnection({
       iceServers: [
