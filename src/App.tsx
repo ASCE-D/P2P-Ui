@@ -52,7 +52,7 @@ const VideoCall: React.FC = () => {
   useEffect(() => {
     console.log("🔄 Initializing VideoCall component");
 
-    socket.current = io("https://signaling-nodejs.onrender.com");
+    socket.current = io("http://localhost:3000");
 
     peerConnection.current = new RTCPeerConnection({
       iceServers: [
@@ -160,7 +160,10 @@ const VideoCall: React.FC = () => {
       setCallState((prev) => ({ ...prev, remoteSocketId: from }));
 
       try {
-        await startLocalStream();
+        // Check if local stream already exists
+        if (!callState.localStream) {
+          await startLocalStream();
+        }
         await peerConnection.current?.setRemoteDescription(
           new RTCSessionDescription(offer)
         );
@@ -302,10 +305,15 @@ const VideoCall: React.FC = () => {
 
   const startLocalStream = async () => {
     try {
+      console.log("🎥 startLocalStream: Starting...");
       if (callState.localStream) {
+        console.log(
+          "🎥 startLocalStream: Local stream exists, stopping tracks."
+        );
         callState.localStream.getTracks().forEach((track) => track.stop());
       }
 
+      console.log("🎥 startLocalStream: Getting user media...");
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           deviceId: devices.selectedAudioInput,
@@ -319,6 +327,7 @@ const VideoCall: React.FC = () => {
           height: { ideal: 720 },
         },
       });
+      console.log("🎥 startLocalStream: User media received:", stream);
 
       if (!stream) {
         console.error("getUserMedia returned undefined.");
@@ -328,52 +337,62 @@ const VideoCall: React.FC = () => {
 
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
+        console.log("🎥 startLocalStream: Local video ref updated.");
       }
 
       setCallState((prev) => ({ ...prev, localStream: stream }));
+      console.log("🎥 startLocalStream: callState.localStream updated.");
 
-      console.log("Audio Tracks:", stream.getAudioTracks()); // Check tracks immediately
-      console.log("Video Tracks:", stream.getVideoTracks()); // Check tracks immediately
+      console.log(
+        "🎥 startLocalStream: Audio Tracks:",
+        stream.getAudioTracks()
+      );
+      console.log(
+        "🎥 startLocalStream: Video Tracks:",
+        stream.getVideoTracks()
+      );
 
-      const audioContext = new AudioContext(); // Create audio context here
+      const audioContext = new AudioContext();
+      console.log("🎥 startLocalStream: AudioContext created.");
       const rnnoiseWasmBinary = await loadRnnoise({
         url: rnnoiseWasmPath,
         simdUrl: rnnoiseWasmSimdPath,
       });
+      console.log("🎥 startLocalStream: RNNoise WASM loaded.");
       await audioContext.audioWorklet.addModule(rnnoiseWorkletPath);
+      console.log("🎥 startLocalStream: RNNoise Worklet module added.");
       const rnnoiseNode = new RnnoiseWorkletNode(audioContext, {
         wasmBinary: rnnoiseWasmBinary,
         maxChannels: 2,
       });
+      console.log("🎥 startLocalStream: RnnoiseWorkletNode created.");
       const sourceNode = audioContext.createMediaStreamSource(stream);
-      const gainNode = audioContext.createGain(); // Keep gain node for potential volume control
+      const gainNode = audioContext.createGain();
       gainNode.gain.value = 1;
 
       sourceNode.connect(rnnoiseNode);
       rnnoiseNode.connect(gainNode);
-      // gainNode.connect(audioContext.destination); // Optional: For local playback
 
-      // 1. Create a MediaStreamAudioDestinationNode
       const destination = audioContext.createMediaStreamDestination();
+      gainNode.connect(destination);
 
-      // 2. Connect the gainNode (or rnnoiseNode directly if no gain control) to the destination
-      gainNode.connect(destination); // or rnnoiseNode.connect(destination);
-
-      // 3. Get the processed MediaStream track from the destination
       const processedAudioTrack = destination.stream.getAudioTracks()[0];
-
-      // 4. Replace the original track in the getUserMedia stream
       const originalAudioTrack = stream.getAudioTracks()[0];
       stream.removeTrack(originalAudioTrack);
       stream.addTrack(processedAudioTrack);
+      console.log("🎥 startLocalStream: Audio track processed and replaced.");
 
-      // Add the *modified* stream to the peer connection
       if (peerConnection.current) {
         stream.getTracks().forEach((track) => {
-          console.log("Adding processed track:", track);
+          console.log(
+            "🎥 startLocalStream: Adding track to peer connection:",
+            track
+          );
           peerConnection.current?.addTrack(track, stream);
         });
+        console.log("🎥 startLocalStream: Tracks added to peer connection.");
       }
+      console.log("🎥 startLocalStream: Finished.");
     } catch (error) {
       console.error("Error starting local stream:", error);
       throw error;
@@ -381,13 +400,17 @@ const VideoCall: React.FC = () => {
   };
 
   const handleNegotiationNeeded = async () => {
+    console.log("🤝 handleNegotiationNeeded: Negotiation needed triggered.");
     try {
       const offer = await peerConnection.current?.createOffer();
+      console.log("🤝 handleNegotiationNeeded: Offer created:", offer);
       await peerConnection.current?.setLocalDescription(offer);
+      console.log("🤝 handleNegotiationNeeded: Local description set.");
       socket.current?.emit("call", {
         to: callState.remoteSocketId,
         offer,
       });
+      console.log("🤝 handleNegotiationNeeded: 'call' event emitted.");
     } catch (error) {
       console.error("Error creating offer:", error);
     }
@@ -430,30 +453,43 @@ const VideoCall: React.FC = () => {
   };
 
   const makeCall = async (targetSocketId: string) => {
-    if (isCalling) return;
+    if (isCalling) {
+      console.log("📞 makeCall: Already calling, returning.");
+      return;
+    }
     setIsCalling(true);
-    console.log("📞 Initiating call to socket:", targetSocketId);
+    console.log("📞 makeCall: Initiating call to socket:", targetSocketId);
 
     try {
+      console.log("📞 makeCall: Calling startLocalStream...");
       await startLocalStream();
+      console.log("📞 makeCall: startLocalStream completed.");
       setCallState((prev) => ({ ...prev, remoteSocketId: targetSocketId }));
+      console.log("📞 makeCall: remoteSocketId set to:", targetSocketId);
 
+      console.log("📞 makeCall: Creating offer...");
       const offer = await peerConnection.current?.createOffer({
         offerToReceiveAudio: true,
         offerToReceiveVideo: true,
       });
+      console.log("📞 makeCall: Offer created:", offer);
 
+      console.log("📞 makeCall: Setting local description...");
       await peerConnection.current?.setLocalDescription(offer);
+      console.log("📞 makeCall: Local description set.");
 
+      console.log("📞 makeCall: Emitting 'call-user' event...");
       socket.current?.emit("call-user", {
         to: targetSocketId,
         offer,
       });
+      console.log("📞 makeCall: 'call-user' event emitted.");
     } catch (error) {
-      console.error("❌ Error making call:", error);
+      console.error("❌ makeCall: Error making call:", error);
       resetCallState();
     } finally {
       setIsCalling(false);
+      console.log("📞 makeCall: isCalling set to false.");
     }
   };
 
